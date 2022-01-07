@@ -4,6 +4,7 @@ import pandas as pd
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import datetime
 
 SCOPE = [
     # Used to send and retrieve data to and from Google Sheets
@@ -17,7 +18,7 @@ creds = ServiceAccountCredentials.from_json_keyfile_name(os.path.join("config", 
 
 client = gspread.authorize(creds)
 
-sheet = client.open("reddit_data").sheet1
+worksheet = client.open("reddit_data").sheet1
          
 conf_path = os.path.join('config', 'conf.json')
 with open(conf_path, "r") as conf_file:
@@ -32,7 +33,14 @@ reddit = praw.Reddit(
 
 
 if __name__=="__main__":
-    for submission in reddit.subreddit("UCSD").hot(limit=10):
-        print(submission.title)
+    reddit_data = []
+    subreddit = "UCSD"
+    for submission in reddit.subreddit(subreddit).hot(limit=10):
+        reddit_data.append((subreddit, submission.title, submission.selftext, submission.url, str(datetime.datetime.fromtimestamp(submission.created))))
         
-    print(pd.DataFrame(sheet.get_all_records()))
+    reddit_data_df = pd.DataFrame(reddit_data, columns=["Subreddit", "Title", "Text", "URL", "Date Created"])
+    
+    
+    worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist())
+        
+    print(pd.DataFrame(worksheet.get_all_records()))
