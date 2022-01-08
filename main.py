@@ -43,33 +43,55 @@ reddit = praw.Reddit(
     user_agent="DSC180B capstone project",
 )
 
+iffy_data = pd.read_csv("iffy+ 2021-03 - EmbedIffy+.tsv", sep="\t")
 
-SUBMISSION_LIMIT = 100
-SLEEP_TIME = .3
+mis_info_domains = set(iffy_data["Domain"])
+
+SUBMISSION_LIMIT = 1000
+SLEEP_TIME = .1
 
 if __name__=="__main__":
     reddit_data = []
     topics = subreddits_df.columns
     for topic in topics:
-        current_subreddits = subreddits_df[topic].str.replace('r/', '')
+        current_subreddits = subreddits_df.loc[subreddits_df[topic] != ""][topic].str.replace('r/', '')
         for subreddit in current_subreddits:
             for index, submission in enumerate(reddit.subreddit(subreddit).hot(limit=SUBMISSION_LIMIT)):
-                print_str = f"Getting data for subreddit: r/{subreddit}; Progress: {round((index/SUBMISSION_LIMIT)*100, 3)}%"
+                print_str = f"Getting data from last {SUBMISSION_LIMIT} submissions from subreddit: r/{subreddit} (Sorting=hot); Progress: {round((index/SUBMISSION_LIMIT)*100, 2)}%"
                 print(print_str, end="\r")
+                
+                try:
+                    author = submission.author.name
+                except AttributeError:
+                    author = "None"
+                if submission.is_self or (submission.domain == 'i.redd.it' or submission.domain == 'v.redd.it' or 'reddit' in submission.domain or 'imgur' in submission.domain or "youtu" in submission.domain):
+                    url = "None"
+                else:
+                    url = submission.url
+                
+                is_mis_info = "Undetected"
+                if submission.domain in mis_info_domains:
+                    print("\nMISINFO DETECTED:", subreddit.upper(), submission.domain, "\n")
+                    is_mis_info = "True"
+                    
                 reddit_data.append((subreddit, 
                                     submission.title,
-                                    submission.author.name, 
+                                    author, 
                                     submission.selftext, 
                                     submission.url, 
                                     str(datetime.datetime.fromtimestamp(submission.created)),
                                     submission.downs,
                                     submission.ups,
-                                    submission.upvote_ratio
+                                    submission.upvote_ratio,
+                                    submission.id,
+                                    is_mis_info
                                     ))
                 
                 time.sleep(SLEEP_TIME)
+            print()  
+            #os.system('cls' if os.name == 'nt' else 'clear')
                 
-    reddit_data_df = pd.DataFrame(reddit_data, columns=["Subreddit", "Title", "Author", "Text", "URL", "Date Created", "Upvotes", "Downvotes", "Upvote Ratio"])
+    reddit_data_df = pd.DataFrame(reddit_data, columns=["Subreddit", "Title", "Author", "Text", "URL", "Date Created", "Downvotes", "Upvotes", "Upvote Ratio", "ID", "Is Misinformation"])
     
     
     submission_data_worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist())
