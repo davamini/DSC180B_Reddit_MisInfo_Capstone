@@ -1,4 +1,5 @@
 from re import sub
+from numpy.lib.function_base import append
 import praw
 import os
 import pandas as pd
@@ -9,7 +10,6 @@ import datetime
 import time
 import sys
 
-# popular, rising popularity (year), covid related, politics, news
 
 SCOPE = [
     # Used to send and retrieve data to and from Google Sheets
@@ -28,10 +28,21 @@ subreddits_worksheet = client.open("database").worksheet('subreddits')
 
 submission_data_worksheet = client.open("database").worksheet('submission_data')
 
-subreddits_df = pd.DataFrame(subreddits_worksheet.get_all_records())
+subreddits_df = pd.DataFrame(subreddits_worksheet.get_all_records()) # Subreddits to analyze
 
+subreddits_data_df = pd.DataFrame(submission_data_worksheet.get_all_records()) # Actual subreddit data
 
+append_location = subreddits_data_df.shape[0] + 2
+top_posts_range = "year"
+submissions_already_aquired = set()
 
+try:
+    submissions_already_aquired = set(subreddits_data_df["ID"].tolist())
+    if len(pd.to_datetime(subreddits_data_df["Date Created"]).dt.year.unique()) > 1:
+        top_posts_range = "month"
+except KeyError as e:
+    print(f"No data detected in {submission_data_worksheet.title} worksheet")
+    
 conf_path = os.path.join('config', 'conf.json')
 with open(conf_path, "r") as conf_file:
     config_data = json.loads(conf_file.read())
@@ -47,8 +58,10 @@ iffy_data = pd.read_csv("iffy+ 2021-03 - EmbedIffy+.tsv", sep="\t")
 
 mis_info_domains = set(iffy_data["Domain"])
 
+
 SUBMISSION_LIMIT = 1000
 SLEEP_TIME = 0.005
+
 
 if __name__=="__main__":
     reddit_data = []
@@ -57,9 +70,15 @@ if __name__=="__main__":
         current_subreddits = subreddits_df.loc[subreddits_df[topic] != ""][topic].str.replace('r/', '')
         for subreddit in current_subreddits:
             try:
-                for index, submission in enumerate(reddit.subreddit(subreddit).top(limit=SUBMISSION_LIMIT)):
-                    print_str = f"Getting data from last {SUBMISSION_LIMIT} submissions from subreddit: r/{subreddit} (Sorting=top (year)); Progress: {round((index/SUBMISSION_LIMIT)*100, 2)}%"
+                for index, submission in enumerate(reddit.subreddit(subreddit).top(time_filter = top_posts_range, limit=SUBMISSION_LIMIT)):
+                    print_str = f"Getting data from last {SUBMISSION_LIMIT} submissions from subreddit: r/{subreddit} (Sorting=top ({top_posts_range})); Progress: {round((index/SUBMISSION_LIMIT)*100, 2)}%"
                     print(print_str, end="\r")
+                    
+                    curr_id = submission.id
+                    
+                    if curr_id in submissions_already_aquired:
+                        submissions_already_aquired
+                        continue
                     
                     try:
                         author = submission.author.name
@@ -75,7 +94,8 @@ if __name__=="__main__":
                         print("\nMISINFO DETECTED:", subreddit.upper(), submission.domain, "\n")
                         is_mis_info = "Detected"
                         
-                    reddit_data.append((subreddit, 
+                    reddit_data.append((topic,
+                                        subreddit, 
                                         submission.title,
                                         author, 
                                         submission.selftext, 
@@ -84,7 +104,7 @@ if __name__=="__main__":
                                         submission.downs,
                                         submission.ups,
                                         submission.upvote_ratio,
-                                        submission.id,
+                                        curr_id,
                                         is_mis_info
                                         ))
                     
@@ -95,8 +115,12 @@ if __name__=="__main__":
             
             print()  
             #os.system('cls' if os.name == 'nt' else 'clear')
-                
-    reddit_data_df = pd.DataFrame(reddit_data, columns=["Subreddit", "Title", "Author", "Text", "URL Domain", "Date Created", "Downvotes", "Upvotes", "Upvote Ratio", "ID", "Is Misinformation"])
     
+    cols = ["Topic", "Subreddit", "Title", "Author", "Text", "URL Domain", "Date Created", "Downvotes", "Upvotes", "Upvote Ratio", "ID", "Is Misinformation"]
+    reddit_data_df = pd.DataFrame(reddit_data, columns=cols)
     
-    submission_data_worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist())
+    if append_location > 2:
+        print(f"\nStarting update at line: A{append_location}")
+        submission_data_worksheet.update(f"A{append_location}",  reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
+    else:
+        submission_data_worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
