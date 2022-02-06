@@ -1,5 +1,3 @@
-from re import sub
-from numpy.lib.function_base import append
 import praw
 import os
 import pandas as pd
