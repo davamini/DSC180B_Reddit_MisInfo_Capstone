@@ -5,3 +5,11 @@ Analyzing the spread of misinformation in the Reddit platform.
 ```sh
 pip install pandas praw gspread oauth2client
 ```
+#### Run either:
+```sh
+python run.py
+```
+#### Or:
+```sh
+python run.py test
+```
