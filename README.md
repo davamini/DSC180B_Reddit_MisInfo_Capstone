@@ -1,5 +1,6 @@
-# DSC180B_Reddit_MisInfo_Capstone
-Analyzing the spread of misinformation in the Reddit platform.
+# DSC180B Subreddit Misinformation Capstone Project
+Analyzing the spread of misinformation in the Reddit platform.<br>
+Website URL: https://davamini.com/dsc180_project.github.io/index.html
 <br>
 ### Build Instructions:
 ```sh
