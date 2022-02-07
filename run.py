@@ -57,8 +57,8 @@ try:
 
     mis_info_domains = set(iffy_data["Domain"])
 
-except Exception as e:
-    print(f"Error: {e}\nContinuing...")
+except FileNotFoundError as e:
+    print(f"Error: {e}\nNot a problem if 'test' parameter was specified\nContinuing...")
 
 
 SUBMISSION_LIMIT = 1000
@@ -82,7 +82,7 @@ if __name__=="__main__":
             title="# of Misinformation URLs found per Subreddit").get_figure()
 
         curr_fig.savefig(os.path.join("outputs", "# of Misinformation URLs found per Subreddit"), bbox_inches='tight')
-   
+        print(f"Wrote '# of Misinformation URLs found per Subreddit.png' to outputs/")
         
         sys.exit(0)
         
@@ -95,16 +95,19 @@ if __name__=="__main__":
         current_subreddits = subreddits_df.loc[subreddits_df[topic] != ""][topic].str.replace('r/', '')
         for subreddit in current_subreddits:
             try:
+                #Iterates through submissions based on upvotes in descending order
                 for index, submission in enumerate(reddit.subreddit(subreddit).top(time_filter = top_posts_range, limit=SUBMISSION_LIMIT)):
                     print_str = f"Getting data from last {SUBMISSION_LIMIT} submissions from subreddit: r/{subreddit} (Sorting=top ({top_posts_range})); Progress: {round((index/SUBMISSION_LIMIT)*100, 2)}%"
                     print(print_str, end="\r")
                     
                     curr_id = submission.id
                     
+                    # Makes sure that the submission was not already uploaded to google sheets
                     if curr_id in submissions_already_aquired:
                         submissions_already_aquired
                         continue
                     
+                    # Specifies Author and Domain fields
                     try:
                         author = submission.author.name
                     except AttributeError:
@@ -113,12 +116,14 @@ if __name__=="__main__":
                         url = "None"
                     else:
                         url = submission.domain
-                    
+                        
+                    # Detects misinformation domains
                     is_mis_info = "Undetected"
                     if submission.domain in mis_info_domains:
                         print("\nMISINFO DETECTED:", subreddit.upper(), submission.domain, "\n")
                         is_mis_info = "Detected"
                         
+                    # Builds table that will be uploaded to google sheets
                     reddit_data.append((topic,
                                         subreddit, 
                                         submission.title,
@@ -144,6 +149,7 @@ if __name__=="__main__":
     cols = ["Topic", "Subreddit", "Title", "Author", "Text", "URL Domain", "Date Created", "Downvotes", "Upvotes", "Upvote Ratio", "ID", "Is Misinformation"]
     reddit_data_df = pd.DataFrame(reddit_data, columns=cols)
     
+    # Uploads to google sheets and dedcides whether to append the data or not
     if append_location > 2:
         print(f"\nStarting update at line: A{append_location}")
         submission_data_worksheet.update(f"A{append_location}",  reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
