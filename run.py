@@ -7,7 +7,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import datetime
 import time
 import sys
-
+from collections import defaultdict
 
 SCOPE = [
     # Used to send and retrieve data to and from Google Sheets
@@ -24,7 +24,7 @@ try:
 
 
     subreddits_worksheet = client.open("database").worksheet('subreddits')
-
+    domain_worksheet = client.open("database").worksheet('domain_results')
     submission_data_worksheet = client.open("database").worksheet('submission_data')
 
     subreddits_df = pd.DataFrame(subreddits_worksheet.get_all_records()) # Subreddits to analyze
@@ -65,6 +65,9 @@ SUBMISSION_LIMIT = 1000
 SLEEP_TIME = 0.005
 
 # python run.py test
+# python run.py get_submission_data
+# python run.py expand_misinfo_network
+
 if __name__=="__main__":
     
     if sys.argv[1] == "test":
@@ -89,69 +92,88 @@ if __name__=="__main__":
     # Gets subreddit submission data based on parameters in a google sheet
     # Detects misinformation based on iffy.news
     # Uploads data to a google sheet database
-    reddit_data = []
-    topics = subreddits_df.columns
-    for topic in topics:
-        current_subreddits = subreddits_df.loc[subreddits_df[topic] != ""][topic].str.replace('r/', '')
-        for subreddit in current_subreddits:
-            try:
-                #Iterates through submissions based on upvotes in descending order
-                for index, submission in enumerate(reddit.subreddit(subreddit).top(time_filter = top_posts_range, limit=SUBMISSION_LIMIT)):
-                    print_str = f"Getting data from last {SUBMISSION_LIMIT} submissions from subreddit: r/{subreddit} (Sorting=top ({top_posts_range})); Progress: {round((index/SUBMISSION_LIMIT)*100, 2)}%"
-                    print(print_str, end="\r")
-                    
-                    curr_id = submission.id
-                    
-                    # Makes sure that the submission was not already uploaded to google sheets
-                    if curr_id in submissions_already_aquired:
-                        submissions_already_aquired
-                        continue
-                    
-                    # Specifies Author and Domain fields
-                    try:
-                        author = submission.author.name
-                    except AttributeError:
-                        author = "None"
-                    if submission.is_self or (submission.domain == 'i.redd.it' or submission.domain == 'v.redd.it' or 'reddit' in submission.domain or 'imgur' in submission.domain or "youtu" in submission.domain):
-                        url = "None"
-                    else:
-                        url = submission.domain
+    if sys.argv[1] == "get_submission_data":
+        most_common_misinfo_urls = defaultdict(int)
+        reddit_data = []
+        topics = subreddits_df.columns
+        for topic in topics:
+            current_subreddits = subreddits_df.loc[subreddits_df[topic] != ""][topic].str.replace('r/', '')
+            for subreddit in current_subreddits:
+                try:
+                    #Iterates through submissions based on upvotes in descending order
+                    for index, submission in enumerate(reddit.subreddit(subreddit).top(time_filter = top_posts_range, limit=SUBMISSION_LIMIT)):
+                        print_str = f"Getting data from last {SUBMISSION_LIMIT} submissions from subreddit: r/{subreddit} (Sorting=top ({top_posts_range})); Progress: {round((index/SUBMISSION_LIMIT)*100, 2)}%"
+                        print(print_str, end="\r")
                         
-                    # Detects misinformation domains
-                    is_mis_info = "Undetected"
-                    if submission.domain in mis_info_domains:
-                        print("\nMISINFO DETECTED:", subreddit.upper(), submission.domain, "\n")
-                        is_mis_info = "Detected"
+                        curr_id = submission.id
                         
-                    # Builds table that will be uploaded to google sheets
-                    reddit_data.append((topic,
-                                        subreddit, 
-                                        submission.title,
-                                        author, 
-                                        submission.selftext, 
-                                        url, 
-                                        str(datetime.datetime.fromtimestamp(submission.created)),
-                                        submission.downs,
-                                        submission.ups,
-                                        submission.upvote_ratio,
-                                        curr_id,
-                                        is_mis_info
-                                        ))
-                    
-                    time.sleep(SLEEP_TIME)
-            except Exception as e:
-                print(e)
-                continue
+                        # Makes sure that the submission was not already uploaded to google sheets
+                        if curr_id in submissions_already_aquired:
+                            submissions_already_aquired
+                            continue
+                        
+                        # Specifies Author and Domain fields
+                        try:
+                            author = submission.author.name
+                        except AttributeError:
+                            author = "None"
+                        if submission.is_self or (submission.domain == 'i.redd.it' or submission.domain == 'v.redd.it' or 'reddit' in submission.domain or 'imgur' in submission.domain or "youtu" in submission.domain):
+                            url = "None"
+                        else:
+                            url = submission.domain
+                            
+                        # Detects misinformation domains
+                        is_mis_info = "Undetected"
+                        if submission.domain in mis_info_domains:
+                            print("\nMISINFO DETECTED:", subreddit.upper(), submission.domain, "\n")
+                            is_mis_info = "Detected"
+                            most_common_misinfo_urls[submission.domain] += 1
+                        # Builds table that will be uploaded to google sheets
+                        reddit_data.append((topic,
+                                            subreddit, 
+                                            submission.title,
+                                            author, 
+                                            submission.selftext, 
+                                            url, 
+                                            str(datetime.datetime.fromtimestamp(submission.created)),
+                                            submission.downs,
+                                            submission.ups,
+                                            submission.upvote_ratio,
+                                            curr_id,
+                                            is_mis_info
+                                            ))
+                        
+                        time.sleep(SLEEP_TIME)
+                except Exception as e:
+                    print(e)
+                    continue
+                
+                print()  
+                #os.system('cls' if os.name == 'nt' else 'clear')
+        most_common_misinfo_urls = [i for i in most_common_misinfo_urls.items()]
+        cols = ["Topic", "Subreddit", "Title", "Author", "Text", "URL Domain", "Date Created", "Downvotes", "Upvotes", "Upvote Ratio", "ID", "Is Misinformation"]
+        reddit_data_df = pd.DataFrame(reddit_data, columns=cols)
+        domain_results = pd.DataFrame(most_common_misinfo_urls, columns=["Domain", "Count"]).sort_values(by="Count")
+        domain_worksheet.update([domain_results.columns.values.tolist()] + domain_results.values.tolist(), value_input_option='USER_ENTERED')
+        domain_results.to_csv(os.path.join("data", "domain_results.csv"))
+        # Uploads to google sheets and dedcides whether to append the data or not
+        if append_location > 2:
+            print(f"\nStarting update at line: A{append_location}")
+            submission_data_worksheet.update(f"A{append_location}",  reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
+        else:
+            submission_data_worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
             
-            print()  
-            #os.system('cls' if os.name == 'nt' else 'clear')
-    
-    cols = ["Topic", "Subreddit", "Title", "Author", "Text", "URL Domain", "Date Created", "Downvotes", "Upvotes", "Upvote Ratio", "ID", "Is Misinformation"]
-    reddit_data_df = pd.DataFrame(reddit_data, columns=cols)
-    
-    # Uploads to google sheets and dedcides whether to append the data or not
-    if append_location > 2:
-        print(f"\nStarting update at line: A{append_location}")
-        submission_data_worksheet.update(f"A{append_location}",  reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
-    else:
-        submission_data_worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
+    elif sys.argv[1] == "expand_misinfo_network":
+        import analysis_funcs as af
+        new_misinfo_subreddits = af.expand_subreddit_analysis()
+        misinfo_network_subreddits_lst = subreddits_df["Expanded MisInfo Network Subreddits"].tolist()
+        new_misinfo_subreddits_lst = new_misinfo_subreddits["Subreddit"].apply(lambda x: f"r/{x}").tolist()
+        #print(new_misinfo_subreddits_lst)
+        misinfo_network_subreddits_lst += new_misinfo_subreddits_lst
+        misinfo_network_subreddits_lst = misinfo_network_subreddits_lst[::-1]
+        #print(misinfo_network_subreddits_lst)
+        subreddits_df.drop("Expanded MisInfo Network Subreddits", axis=1, inplace=True)
+        subreddits_df = pd.concat([subreddits_df, pd.DataFrame({"Expanded MisInfo Network Subreddits": misinfo_network_subreddits_lst})], axis=1).fillna('')
+        #print(subreddits_df)
+        subreddits_worksheet.update([subreddits_df.columns.values.tolist()] + subreddits_df.values.tolist(), value_input_option='USER_ENTERED')
+        
