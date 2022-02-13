@@ -8,8 +8,8 @@ import datetime
 import time
 from collections import defaultdict
 
-USERS_TO_ANALYZE = 20
-COMMENT_LIMIT = 200
+USERS_TO_ANALYZE = 40
+COMMENT_LIMIT = 500
 SLEEP_TIME = 5
 
 SCOPE = [
@@ -103,8 +103,20 @@ def expand_subreddit_analysis():
 
     curr_fig.savefig(os.path.join("outputs", "# of MisInfo Posters per Subreddit"), bbox_inches='tight')
     
-    curr_fig = pd.Series(subreddits_most_common).sort_values(ascending=False).iloc[:24].sort_values(ascending=True)
+    curr_fig = pd.Series(subreddits_most_common).sort_values(ascending=False).iloc[:42].sort_values(ascending=True)
     curr_fig = pd.DataFrame(curr_fig).reset_index()
     curr_fig.columns = ["Subreddit", "# of MisInfo Posters"]
+    user_data_worksheet = client.open("database").worksheet('user_data')
+    attempts = 1
+    updated = False
+    while not updated:
+        try:
+            user_data_worksheet.update([curr_fig.columns.values.tolist()] + curr_fig.values.tolist(), value_input_option='USER_ENTERED')
+            updated = True
+            print(f"Updated user_data sheet\nAttempts: {attempts}")
+        except Exception as e:
+            print(f"{e}; Sleeping: {2**attempts} Seconds")
+            time.sleep(2**attempts)
+            attempts += 1
     
-    return curr_fig.loc[curr_fig["Subreddit"].isin(all_subreddits) == False]
+    return curr_fig.loc[curr_fig["Subreddit"].str.lower().isin([i.lower() for i in all_subreddits]) == False]

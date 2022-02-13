@@ -8,6 +8,7 @@ import datetime
 import time
 import sys
 from collections import defaultdict
+import math
 
 SCOPE = [
     # Used to send and retrieve data to and from Google Sheets
@@ -16,6 +17,9 @@ SCOPE = [
     "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/drive",
 ]
+
+updated = False
+attempts = 2
 
 try:
     creds = ServiceAccountCredentials.from_json_keyfile_name(os.path.join("config", "google_sheets_creds.json"), SCOPE)
@@ -61,7 +65,7 @@ except FileNotFoundError as e:
     print(f"Error: {e}\nNot a problem if 'test' parameter was specified\nContinuing...")
 
 
-SUBMISSION_LIMIT = 1000
+SUBMISSION_LIMIT = 800
 SLEEP_TIME = 0.005
 
 # python run.py test
@@ -95,10 +99,16 @@ if __name__=="__main__":
     if sys.argv[1] == "get_submission_data":
         most_common_misinfo_urls = defaultdict(int)
         reddit_data = []
+        all_subreddits = []
         topics = subreddits_df.columns
         for topic in topics:
             current_subreddits = subreddits_df.loc[subreddits_df[topic] != ""][topic].str.replace('r/', '')
             for subreddit in current_subreddits:
+                if subreddit in all_subreddits:
+                    print(f"Already analyzed subreddit: {subreddit}; skipping...")
+                    continue
+                else:
+                    all_subreddits.append(subreddit)
                 try:
                     #Iterates through submissions based on upvotes in descending order
                     for index, submission in enumerate(reddit.subreddit(subreddit).top(time_filter = top_posts_range, limit=SUBMISSION_LIMIT)):
@@ -153,15 +163,25 @@ if __name__=="__main__":
         most_common_misinfo_urls = [i for i in most_common_misinfo_urls.items()]
         cols = ["Topic", "Subreddit", "Title", "Author", "Text", "URL Domain", "Date Created", "Downvotes", "Upvotes", "Upvote Ratio", "ID", "Is Misinformation"]
         reddit_data_df = pd.DataFrame(reddit_data, columns=cols)
-        domain_results = pd.DataFrame(most_common_misinfo_urls, columns=["Domain", "Count"]).sort_values(by="Count")
+        domain_results = pd.DataFrame(most_common_misinfo_urls, columns=["Domain", "Count"]).groupby("Domain").sum().reset_index().sort_values(by="Count")
         domain_worksheet.update([domain_results.columns.values.tolist()] + domain_results.values.tolist(), value_input_option='USER_ENTERED')
-        domain_results.to_csv(os.path.join("data", "domain_results.csv"))
+        #domain_results.to_csv(os.path.join("data", "domain_results.csv"))
         # Uploads to google sheets and dedcides whether to append the data or not
         if append_location > 2:
             print(f"\nStarting update at line: A{append_location}")
             submission_data_worksheet.update(f"A{append_location}",  reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
         else:
-            submission_data_worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
+            #reddit_data_df.to_csv(os.path.join("data", "submission_data.csv"))
+            while not updated:
+                try:
+                    submission_data_worksheet.update([reddit_data_df.columns.values.tolist()] + reddit_data_df.values.tolist(), value_input_option='USER_ENTERED')
+                    updated = True
+                    print(f"Updated Submission sheet\nAttempts: {attempts-1}")
+                except Exception as e:
+                    print(f"{e}; Sleeping: {2**attempts} Seconds")
+                    time.sleep(2**attempts)
+                    attempts += 1
+            
             
     elif sys.argv[1] == "expand_misinfo_network":
         import analysis_funcs as af
@@ -170,10 +190,17 @@ if __name__=="__main__":
         new_misinfo_subreddits_lst = new_misinfo_subreddits["Subreddit"].apply(lambda x: f"r/{x}").tolist()
         #print(new_misinfo_subreddits_lst)
         misinfo_network_subreddits_lst += new_misinfo_subreddits_lst
-        misinfo_network_subreddits_lst = misinfo_network_subreddits_lst[::-1]
+        #misinfo_network_subreddits_lst = misinfo_network_subreddits_lst[::-1] # If nothing in "Expanded MisInfo Network Subreddits" field
         #print(misinfo_network_subreddits_lst)
         subreddits_df.drop("Expanded MisInfo Network Subreddits", axis=1, inplace=True)
         subreddits_df = pd.concat([subreddits_df, pd.DataFrame({"Expanded MisInfo Network Subreddits": misinfo_network_subreddits_lst})], axis=1).fillna('')
         #print(subreddits_df)
-        subreddits_worksheet.update([subreddits_df.columns.values.tolist()] + subreddits_df.values.tolist(), value_input_option='USER_ENTERED')
-        
+        while not updated:
+            try:
+                subreddits_worksheet.update([subreddits_df.columns.values.tolist()] + subreddits_df.values.tolist(), value_input_option='USER_ENTERED')
+                updated = True
+                print(f"Updated Subreddits sheet\nAttempts: {attempts-1}")
+            except Exception as e:
+                print(f"{e}; Sleeping: {2**attempts} Seconds")
+                time.sleep(2**attempts)
+                attempts += 1
