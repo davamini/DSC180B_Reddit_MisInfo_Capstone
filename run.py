@@ -71,6 +71,7 @@ SLEEP_TIME = 0.005
 # python run.py test
 # python run.py get_submission_data
 # python run.py expand_misinfo_network
+# python run.py generate_figures
 
 if __name__=="__main__":
     
@@ -184,8 +185,10 @@ if __name__=="__main__":
             
             
     elif sys.argv[1] == "expand_misinfo_network":
+        
         import analysis_funcs as af
-        new_misinfo_subreddits = af.expand_subreddit_analysis()
+        subreddits_most_common = af.generate_figures()
+        new_misinfo_subreddits = af.expand_subreddit_analysis(subreddits_most_common)
         misinfo_network_subreddits_lst = subreddits_df["Expanded MisInfo Network Subreddits"].tolist()
         new_misinfo_subreddits_lst = new_misinfo_subreddits["Subreddit"].apply(lambda x: f"r/{x}").tolist()
         #print(new_misinfo_subreddits_lst)
@@ -204,3 +207,8 @@ if __name__=="__main__":
                 print(f"{e}; Sleeping: {2**attempts} Seconds")
                 time.sleep(2**attempts)
                 attempts += 1
+                
+    elif sys.argv[1] == "generate_figures":
+        import analysis_funcs as af
+        print("generating figures")
+        af.generate_figures()

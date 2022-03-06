@@ -7,8 +7,21 @@ from oauth2client.service_account import ServiceAccountCredentials
 import datetime
 import time
 from collections import defaultdict
+import gensim
+from gensim.utils import simple_preprocess
+import nltk
+from nltk.corpus import stopwords
+import gensim.corpora as corpora
+import pyLDAvis.gensim_models as gensimvis
+import pickle 
+import pyLDAvis
+import hvplot.networkx as hvnx
+import networkx as nx
+import holoviews as hv
+from pyvis.network import Network
 
-USERS_TO_ANALYZE = 40
+
+USERS_TO_ANALYZE = 5
 COMMENT_LIMIT = 500
 SLEEP_TIME = 5
 
@@ -41,12 +54,10 @@ sumbission_data_df  = pd.DataFrame(submission_data_worksheet.get_all_records())
 mis_info_posts = sumbission_data_df.loc[sumbission_data_df["Is Misinformation"] == "Detected"].reset_index(drop=True)
 all_subreddits = sumbission_data_df["Subreddit"].unique()
 
-def expand_subreddit_analysis():
+def generate_figures():
     """
-    Increases the the scope of the misinformation network
-    through adding more subreddits to the google sheet list of
-    subreddits to analyze if misinfo-posters are seen interacting
-    with them.
+    Generates figures. Returns a dictionary that has the number of misinfo
+    posters per subreddit
     """
     top_authors = mis_info_posts["Author"].value_counts().iloc[1:USERS_TO_ANALYZE+1]
     old_index = top_authors.index
@@ -100,8 +111,19 @@ def expand_subreddit_analysis():
                                                                              ylabel="# of MisInfo Posters",
                                                                              xlabel="Subreddit"
                                                                             ).get_figure()
-
-    curr_fig.savefig(os.path.join("outputs", "# of MisInfo Posters per Subreddit"), bbox_inches='tight')
+    
+    curr_fig.savefig(os.path.join("outputs", "# of MisInfo Posters per Subreddit.png"), bbox_inches='tight')
+    output_topic_model_interactive_graph(subreddit_of_comments_per_user)
+    
+    return subreddits_most_common
+    
+def expand_subreddit_analysis(subreddits_most_common):
+    """
+    Increases the the scope of the misinformation network
+    through adding more subreddits to the google sheet list of
+    subreddits to analyze if misinfo-posters are seen interacting
+    with them.
+    """
     
     curr_fig = pd.Series(subreddits_most_common).sort_values(ascending=False).iloc[:42].sort_values(ascending=True)
     curr_fig = pd.DataFrame(curr_fig).reset_index()
@@ -120,3 +142,93 @@ def expand_subreddit_analysis():
             attempts += 1
     
     return curr_fig.loc[curr_fig["Subreddit"].str.lower().isin([i.lower() for i in all_subreddits]) == False]
+
+
+def output_topic_model_interactive_graph(subreddit_of_comments_per_user):
+    """
+    Outputs Topic Model and interactive graph into output folder
+    """
+    stop_words = stopwords.words('english')
+    stop_words.extend(['from', 'subject', 're', 'edu', 'use'])
+
+    def words_from_sentence(sents):
+        for sent in sents:
+            yield(gensim.utils.simple_preprocess(str(sent), deacc=True))
+            
+    def take_out_stopwords(texts):
+        return [[word for word in simple_preprocess(str(words)) 
+                if word not in stop_words] for words in texts]
+
+    data = sumbission_data_df['Title'].values.tolist()
+    data_words = list(words_from_sentence(data))
+    data_words = take_out_stopwords(data_words)
+    
+    id_2_word = corpora.Dictionary(data_words)
+    words = data_words
+    text_collection = [id_2_word.doc2bow(word) for word in words]
+    topics = 5
+    curr_lda = gensim.models.LdaMulticore(corpus=text_collection,
+                                        id2word=id_2_word,
+                                        num_topics=topics)
+    
+    LDAvis_data_path = os.path.join("outputs", 'outputs'+str(topics))
+    
+    LDAvis_started = gensimvis.prepare(curr_lda, text_collection, id_2_word)
+    with open(LDAvis_data_path, 'wb') as f:
+        pickle.dump(LDAvis_started, f)
+    with open(LDAvis_data_path, 'rb') as f:
+        LDAvis_started = pickle.load(f)
+        
+    pyLDAvis.save_html(LDAvis_started, os.path.join("outputs", "model_output.html"))
+    print("Created model_output.html")
+    ### Starting graph creation
+    
+   
+
+    edge_lst = []
+    edges_dict = defaultdict(set)
+    for user, subreddits in subreddit_of_comments_per_user.items():
+        for subreddit1 in subreddits:
+            for subreddit2 in subreddits:
+                if subreddit1 == subreddit2:
+                    continue
+                else:
+                    edges_dict[subreddit1].add(subreddit2)
+
+    popularity_dict = defaultdict(int)
+    for subreddit1, subreddits in edges_dict.items():
+        popularity_dict[subreddit1] = len(subreddits)
+        
+    top_mis_info_subreddits = pd.Series(popularity_dict).sort_values(ascending=False).iloc[:50].index
+
+    for subreddit in top_mis_info_subreddits:
+        for curr_subreddit in edges_dict[subreddit]:
+            if curr_subreddit in top_mis_info_subreddits:
+                edge_lst.append((subreddit, curr_subreddit))
+                
+    G = nx.petersen_graph()
+    G.add_edges_from(edge_lst) 
+    
+    N = Network(directed=False)
+    N.repulsion(node_distance=100)
+    for n, attrs in G.nodes.data():
+        N.add_node(n)
+    for e in G.edges.data():
+        N.add_edge(e[0], e[1], width=.0001)
+
+    for i in N.edges.copy():
+        if isinstance(i['from'], int):
+            N.edges.remove(i)
+        
+    for i in N.node_map.copy():
+        if isinstance(i, int):
+            del N.node_map[i]
+            
+    for i in N.nodes.copy():
+        if isinstance(i['label'], int):
+            N.nodes.remove(i)
+
+    N.width = '1000px'
+    N.height = '1000px'
+    N.write_html('outputs/subreddit_graph.html', notebook=False)
+
